@@ -1,0 +1,176 @@
+# Solana Vote Latency Monitor Configuration
+# 
+# This is an example configuration file. Copy this to config.toml and modify
+# the values according to your environment.
+
+[app]
+# Application name
+name = "svlm"
+
+# Log level (trace, debug, info, warn, error)
+log_level = "info"
+
+# Number of worker threads (optional, defaults to CPU count)
+# For laptop use, limiting to 4 threads is reasonable
+worker_threads = 4
+
+# Enable debug mode (useful for local testing)
+debug = true
+
+[solana]
+# Solana RPC endpoint
+# For local testing with a local validator:
+rpc_endpoint = "http://localhost:8899"
+
+# For testing with public endpoints (rate limited):
+# rpc_endpoint = "https://api.devnet.solana.com"
+
+# Network name (mainnet-beta, testnet, devnet, localnet)
+network = "localnet"
+
+# RPC request timeout in seconds
+timeout_secs = 30
+
+# Maximum concurrent RPC requests
+# Keep low for local testing to avoid overwhelming the RPC
+max_concurrent_requests = 5
+
+[grpc]
+# Yellowstone gRPC endpoint configuration
+# This requires access to a Yellowstone gRPC-enabled endpoint
+# 
+# Examples:
+# - Local validator with Yellowstone plugin: "http://localhost:10000"
+# - Hellomoon: "https://your-instance.fleet.hellomoon.io:2083" 
+# - Triton: "https://your-endpoint.triton.one:443"
+# - Helius: "https://mainnet.helius-rpc.com:443"
+#
+# If not specified or commented out, the monitor will run in discovery-only mode
+# (no real-time vote monitoring, only periodic validator discovery)
+endpoint = "http://localhost:10000"
+
+# Maximum number of concurrent gRPC subscriptions
+# Start with fewer subscriptions for local testing
+max_subscriptions = 50
+
+# Connection timeout in seconds
+connection_timeout_secs = 30
+
+# Reconnection interval in seconds
+reconnect_interval_secs = 5
+
+# Buffer size for incoming transactions
+buffer_size = 10000
+
+# TLS is automatically detected based on the endpoint URL
+# Use https:// for TLS connections, http:// for non-TLS
+# Most remote Yellowstone providers use TLS (https://)
+
+[storage]
+# SQLite database file path
+# Creates a data directory in the current working directory
+database_path = "./data/svlm_local.db"
+
+# Maximum database connections
+# Lower for laptop use
+max_connections = 5
+
+# Enable WAL mode for better concurrent access
+enable_wal = true
+
+# Data retention period in days
+# Shorter for local testing
+retention_days = 7
+
+# Batch size for bulk inserts
+# Smaller batches for local testing
+batch_size = 500
+
+[metrics]
+# Enable Prometheus metrics collection
+enabled = true
+
+# Metrics server bind address
+# Use localhost for security on laptop
+bind_address = "127.0.0.1"
+
+# Metrics server port
+port = 9090
+
+# Metrics collection interval in seconds
+collection_interval_secs = 60
+
+[discovery]
+# Enable automatic validator discovery
+enabled = true
+
+# Discovery refresh interval in seconds
+# More frequent for local testing
+refresh_interval_secs = 60
+
+# Minimum stake amount for inclusion (in SOL)
+# Lower threshold for local testing
+min_stake_sol = 0.0
+
+# Include delinquent validators
+# May want to include for testing
+include_delinquent = true
+
+# Validator whitelist (empty means all validators)
+# Add validator identity pubkeys OR vote account pubkeys to only monitor specific validators
+# The system will match against either the validator's identity pubkey or their vote account pubkey
+whitelist = [
+    # "ValidatorIdentityPubkey1...",
+    # "VoteAccountPubkey2...",
+]
+
+# Validator blacklist
+# Add validator identity pubkeys OR vote account pubkeys to exclude from monitoring
+# The system will exclude validators if either their identity pubkey or vote account pubkey matches
+blacklist = [
+    # "ExcludedValidatorIdentity1...",
+    # "ExcludedVoteAccount2...",
+]
+
+[latency]
+# Moving average window size (number of samples)
+# Smaller window for quicker feedback during testing
+window_size = 100
+
+# Calculate network-wide statistics
+calculate_global_stats = true
+
+# Statistics calculation interval in seconds
+# More frequent for testing
+stats_interval_secs = 30
+
+# Outlier detection threshold (standard deviations)
+outlier_threshold = 3.0
+
+# Example environment variable overrides:
+# 
+# You can override any configuration value using environment variables
+# with the prefix SVLM_ and using underscores for nested values.
+#
+# Examples:
+# SVLM_SOLANA_RPC_ENDPOINT=https://custom-rpc.example.com
+# SVLM_GRPC_ENDPOINT=http://localhost:10000
+# SVLM_METRICS_PORT=9091
+# SVLM_LOG_LEVEL=debug
+# SVLM_STORAGE_DATABASE_PATH=/var/lib/svlm/data.db
+#
+# Quick start options:
+#
+# Option 1: Discovery-only mode (no gRPC required)
+# 1. Comment out the grpc.endpoint setting
+# 2. Run: cargo run -- --config config/example.toml --discovery-only
+#
+# Option 2: With local Yellowstone validator
+# 1. Install Yellowstone gRPC plugin on your validator
+# 2. Start validator: solana-test-validator --geyser-plugin-config yellowstone-config.json
+# 3. Run: cargo run -- --config config/example.toml
+#
+# Option 3: With remote Yellowstone provider
+# 1. Get credentials from provider (Hellomoon, Triton, etc.)
+# 2. Update grpc.endpoint with your endpoint URL
+# 3. Run: cargo run -- --config config/example.toml
