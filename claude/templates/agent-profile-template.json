@@ -1,0 +1,37 @@
+{
+  "name": "{{agent_name}}",
+  "role": "{{agent_role}}",
+  "description": "{{agent_description}}",
+  "expertise": [
+    "{{primary_expertise}}",
+    "{{secondary_expertise}}"
+  ],
+  "tools": [
+    "{{tool_1}}",
+    "{{tool_2}}"
+  ],
+  "responsibilities": [
+    "{{responsibility_1}}",
+    "{{responsibility_2}}"
+  ],
+  "context_requirements": {
+    "files_to_analyze": [
+      "{{file_pattern_1}}",
+      "{{file_pattern_2}}"
+    ],
+    "environment_info": [
+      "{{env_var_1}}",
+      "{{env_var_2}}"
+    ]
+  },
+  "communication_style": "{{communication_style}}",
+  "output_format": "{{output_format}}",
+  "constraints": [
+    "{{constraint_1}}",
+    "{{constraint_2}}"
+  ],
+  "collaboration_with": [
+    "{{collaborator_1}}",
+    "{{collaborator_2}}"
+  ]
+}

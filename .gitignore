@@ -1,0 +1,75 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+
+# Node.js/TypeScript
+node_modules/
+dist/
+build/
+*.js
+*.js.map
+*.d.ts
+!jest.config.js
+!tsconfig.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+config.toml
+config.json
+!config.example.toml
+!config.example.json
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Logs
+logs/
+*.log
+
+# Testing
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Backups
+*.bak
+*.backup
+*~
+
+# OS
+.DS_Store
+Thumbs.db
