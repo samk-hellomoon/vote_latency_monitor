@@ -87,6 +87,7 @@ pub struct VoteLatency {
     pub signature: String,
     
     /// The slots being voted on (can be multiple in a single vote transaction)
+    /// @deprecated Use voted_on_slot for single value storage
     pub voted_on_slots: Vec<u64>,
     
     /// The slot where the vote transaction landed
@@ -94,6 +95,7 @@ pub struct VoteLatency {
     
     /// Latency for each voted slot (landed_slot - voted_on_slot)
     /// Each value represents the latency in slots, capped at 255
+    /// @deprecated Use latency_slot for single value storage
     pub latency_slots: Vec<u8>,
 }
 
@@ -354,6 +356,40 @@ impl VoteLatency {
         }
     }
     
+    /// Create a new VoteLatency with a single voted slot and latency value
+    /// This is the preferred method for new code that tracks only the most recent vote
+    pub fn new_single_vote(
+        validator_pubkey: Pubkey,
+        vote_pubkey: Pubkey,
+        voted_on_slot: u64,
+        vote_timestamp: DateTime<Utc>,
+        received_timestamp: DateTime<Utc>,
+        signature: String,
+        landed_slot: u64,
+    ) -> Self {
+        let latency_ms = (received_timestamp - vote_timestamp).num_milliseconds() as u64;
+        
+        // Calculate single latency value
+        let latency_slot = if landed_slot >= voted_on_slot {
+            std::cmp::min(landed_slot - voted_on_slot, 255) as u8
+        } else {
+            0
+        };
+        
+        Self {
+            validator_pubkey,
+            vote_pubkey,
+            slot: voted_on_slot, // Use voted_on_slot as the primary slot for compatibility
+            vote_timestamp,
+            received_timestamp,
+            latency_ms,
+            signature,
+            voted_on_slots: vec![voted_on_slot],
+            landed_slot,
+            latency_slots: vec![latency_slot],
+        }
+    }
+    
     /// Create a new VoteLatency with slot-based latency calculation
     pub fn new_with_slots(
         validator_pubkey: Pubkey,
@@ -408,6 +444,18 @@ impl VoteLatency {
         }
         let sum: u32 = self.latency_slots.iter().map(|&x| x as u32).sum();
         sum as f32 / self.latency_slots.len() as f32
+    }
+    
+    /// Get the single voted slot (for new single-value schema)
+    /// Returns the most recent (last) voted slot if multiple exist
+    pub fn voted_on_slot(&self) -> u64 {
+        self.voted_on_slots.last().copied().unwrap_or(self.slot)
+    }
+    
+    /// Get the single latency value in slots (for new single-value schema)
+    /// Returns the latency for the most recent voted slot
+    pub fn latency_slot(&self) -> u8 {
+        self.latency_slots.last().copied().unwrap_or(0)
     }
     
     /// Verify that the stored latency matches the calculated latency
@@ -627,6 +675,38 @@ mod tests {
         assert_eq!(latency.latency_slots, vec![5, 4, 3]); // landed_slot - each voted_slot
         assert_eq!(latency.max_latency_slots(), 5);
         assert_eq!(latency.avg_latency_slots(), 4.0);
+        assert!(latency.verify_slot_latency());
+    }
+    
+    #[test]
+    fn test_vote_latency_single_vote() {
+        let validator_pubkey = Pubkey::new_unique();
+        let vote_pubkey = Pubkey::new_unique();
+        let vote_time = Utc::now();
+        let received_time = vote_time + chrono::Duration::milliseconds(150);
+        
+        // Test with single voted slot (new schema)
+        let voted_on_slot = 1002;
+        let landed_slot = 1005;
+        
+        let latency = VoteLatency::new_single_vote(
+            validator_pubkey,
+            vote_pubkey,
+            voted_on_slot,
+            vote_time,
+            received_time,
+            "test_sig".to_string(),
+            landed_slot,
+        );
+        
+        // Check single-value calculations
+        assert_eq!(latency.voted_on_slots, vec![voted_on_slot]);
+        assert_eq!(latency.voted_on_slot(), voted_on_slot);
+        assert_eq!(latency.landed_slot, landed_slot);
+        assert_eq!(latency.latency_slots, vec![3]); // landed_slot - voted_on_slot
+        assert_eq!(latency.latency_slot(), 3);
+        assert_eq!(latency.max_latency_slots(), 3);
+        assert_eq!(latency.avg_latency_slots(), 3.0);
         assert!(latency.verify_slot_latency());
     }
     

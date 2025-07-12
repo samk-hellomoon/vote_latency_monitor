@@ -139,16 +139,31 @@ pub fn parse_yellowstone_vote_transaction(
     // Find the highest voted slot for backward compatibility
     let highest_voted_slot = voted_on_slots.iter().max().copied().unwrap_or(slot);
     
-    Ok(VoteLatency::new_with_slots(
-        validator_pubkey,
-        vote_pubkey,
-        highest_voted_slot,
-        vote_timestamp,
-        received_timestamp,
-        signature,
-        voted_on_slots,
-        landed_slot,
-    ))
+    // For TowerSync, we only track the most recent vote, so use single-value constructor
+    // if we have exactly one voted slot (which is typical for TowerSync)
+    if voted_on_slots.len() == 1 {
+        Ok(VoteLatency::new_single_vote(
+            validator_pubkey,
+            vote_pubkey,
+            voted_on_slots[0],
+            vote_timestamp,
+            received_timestamp,
+            signature,
+            landed_slot,
+        ))
+    } else {
+        // Fall back to multi-slot constructor for other vote types
+        Ok(VoteLatency::new_with_slots(
+            validator_pubkey,
+            vote_pubkey,
+            highest_voted_slot,
+            vote_timestamp,
+            received_timestamp,
+            signature,
+            voted_on_slots,
+            landed_slot,
+        ))
+    }
 }
 
 /// Vote program ID on Solana
@@ -439,16 +454,29 @@ impl VoteParserTrait for VoteParser {
         // Find the highest voted slot for backward compatibility
         let highest_voted_slot = voted_on_slots.iter().max().copied().unwrap_or(vote_tx.slot);
         
-        Ok(VoteLatency::new_with_slots(
-            vote_tx.validator_pubkey.clone(),
-            vote_tx.vote_pubkey.clone(),
-            highest_voted_slot,
-            vote_timestamp,
-            received_timestamp,
-            vote_tx.signature.clone(),
-            voted_on_slots,
-            landed_slot,
-        ))
+        // Use single-value constructor when we have exactly one voted slot
+        if voted_on_slots.len() == 1 {
+            Ok(VoteLatency::new_single_vote(
+                vote_tx.validator_pubkey.clone(),
+                vote_tx.vote_pubkey.clone(),
+                voted_on_slots[0],
+                vote_timestamp,
+                received_timestamp,
+                vote_tx.signature.clone(),
+                landed_slot,
+            ))
+        } else {
+            Ok(VoteLatency::new_with_slots(
+                vote_tx.validator_pubkey.clone(),
+                vote_tx.vote_pubkey.clone(),
+                highest_voted_slot,
+                vote_timestamp,
+                received_timestamp,
+                vote_tx.signature.clone(),
+                voted_on_slots,
+                landed_slot,
+            ))
+        }
     }
 
     async fn is_vote_transaction(&self, transaction: &Transaction) -> bool {
@@ -693,6 +721,45 @@ mod tests {
         assert_eq!(result.latency_slots, vec![10, 9, 8, 7, 6, 5]);
         assert_eq!(result.max_latency_slots(), 10);
         assert_eq!(result.avg_latency_slots(), 7.5);
+        
+        // Verify slot latency calculation
+        assert!(result.verify_slot_latency());
+    }
+    
+    #[tokio::test]
+    async fn test_parse_vote_transaction_single_slot() {
+        let parser = VoteParser::new().unwrap();
+        
+        // Create a test vote transaction with single slot (TowerSync-like)
+        let validator_pubkey = Pubkey::new_unique();
+        let vote_pubkey = Pubkey::new_unique();
+        let timestamp = chrono::Utc::now();
+        
+        let vote_tx = VoteTransaction {
+            signature: "test_sig_single".to_string(),
+            validator_pubkey,
+            vote_pubkey,
+            slot: 12345,
+            timestamp,
+            raw_data: vec![], // Empty for this test
+            voted_on_slots: vec![12345], // Single slot
+            landed_slot: Some(12350),
+        };
+        
+        // Parse the transaction
+        let result = parser.parse(&vote_tx).await.unwrap();
+        
+        // Verify the results - should use single-value constructor
+        assert_eq!(result.signature, "test_sig_single");
+        assert_eq!(result.voted_on_slots, vec![12345]);
+        assert_eq!(result.voted_on_slot(), 12345);
+        assert_eq!(result.landed_slot, 12350);
+        
+        // Check calculated latencies
+        assert_eq!(result.latency_slots, vec![5]);
+        assert_eq!(result.latency_slot(), 5);
+        assert_eq!(result.max_latency_slots(), 5);
+        assert_eq!(result.avg_latency_slots(), 5.0);
         
         // Verify slot latency calculation
         assert!(result.verify_slot_latency());

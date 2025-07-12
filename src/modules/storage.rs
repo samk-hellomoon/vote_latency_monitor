@@ -7,7 +7,6 @@
 use anyhow::Result as AnyResult;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde_json;
 use solana_sdk::pubkey::Pubkey;
 use sqlx::{sqlite::SqlitePool, Row};
 use std::path::Path;
@@ -68,11 +67,25 @@ impl StorageManager {
         // Ensure parent directory exists (except for in-memory)
         if config.database_path != ":memory:" {
             if let Some(parent) = db_path.parent() {
+                info!("Creating database directory: {}", parent.display());
                 std::fs::create_dir_all(parent)?;
+            }
+            
+            // Log if database file doesn't exist yet
+            if !db_path.exists() {
+                info!("Database file does not exist, will be created: {}", db_path.display());
             }
         }
         
-        let database_url = format!("sqlite:{}", db_path.display());
+        // Create database URL with create mode
+        let database_url = if config.database_path == ":memory:" {
+            "sqlite::memory:".to_string()
+        } else {
+            // Use create mode to ensure database is created if it doesn't exist
+            format!("sqlite://{}?mode=rwc", db_path.display())
+        };
+        
+        debug!("Connecting to database: {}", database_url);
         let pool = SqlitePool::connect(&database_url).await?;
         
         let manager = Self {
@@ -154,9 +167,9 @@ impl StorageManager {
                 vote_timestamp TIMESTAMP NOT NULL,
                 received_timestamp TIMESTAMP NOT NULL,
                 latency_ms INTEGER NOT NULL,
-                voted_on_slots TEXT,  -- JSON array of slots
+                voted_on_slot BIGINT,  -- Single slot that was voted on
                 landed_slot BIGINT,
-                latency_slots TEXT,  -- JSON array of latencies
+                latency_slots INTEGER,  -- Single latency value in slots
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (validator_pubkey) REFERENCES validators(pubkey)
             )
@@ -238,9 +251,9 @@ impl StorageManager {
     
     /// Add slot-based columns to existing tables if they don't exist
     async fn migrate_add_slot_columns(&self) -> Result<()> {
-        // Check if voted_on_slots column exists
+        // Check if voted_on_slot column exists (new single-value column)
         let column_exists: bool = sqlx::query_scalar(
-            "SELECT COUNT(*) > 0 FROM pragma_table_info('vote_latencies') WHERE name = 'voted_on_slots'"
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('vote_latencies') WHERE name = 'voted_on_slot'"
         )
         .fetch_one(&*self.pool)
         .await?;
@@ -249,13 +262,13 @@ impl StorageManager {
             info!("Migrating database to add slot-based columns...");
             
             // Add columns to vote_latencies
-            sqlx::query("ALTER TABLE vote_latencies ADD COLUMN voted_on_slots TEXT")
+            sqlx::query("ALTER TABLE vote_latencies ADD COLUMN voted_on_slot BIGINT")
                 .execute(&*self.pool)
                 .await?;
             sqlx::query("ALTER TABLE vote_latencies ADD COLUMN landed_slot BIGINT")
                 .execute(&*self.pool)
                 .await?;
-            sqlx::query("ALTER TABLE vote_latencies ADD COLUMN latency_slots TEXT")
+            sqlx::query("ALTER TABLE vote_latencies ADD COLUMN latency_slots INTEGER")
                 .execute(&*self.pool)
                 .await?;
             
@@ -268,16 +281,59 @@ impl StorageManager {
             sqlx::query(
                 r#"
                 UPDATE vote_latencies 
-                SET voted_on_slots = json_array(slot),
+                SET voted_on_slot = slot,
                     landed_slot = slot,
-                    latency_slots = json_array(0)
-                WHERE voted_on_slots IS NULL
+                    latency_slots = 0
+                WHERE voted_on_slot IS NULL
                 "#
             )
             .execute(&*self.pool)
             .await?;
             
             info!("Added slot-based columns to vote_latencies table");
+        }
+        
+        // Check if we need to migrate from JSON arrays to single values
+        let has_json_columns: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('vote_latencies') WHERE name = 'voted_on_slots'"
+        )
+        .fetch_one(&*self.pool)
+        .await?;
+        
+        if has_json_columns {
+            info!("Migrating from JSON arrays to single values...");
+            
+            // First, ensure the new columns exist
+            sqlx::query("ALTER TABLE vote_latencies ADD COLUMN IF NOT EXISTS voted_on_slot BIGINT")
+                .execute(&*self.pool)
+                .await
+                .ok(); // Ignore error if column already exists
+            
+            sqlx::query("ALTER TABLE vote_latencies ADD COLUMN IF NOT EXISTS latency_slots INTEGER")
+                .execute(&*self.pool)
+                .await
+                .ok(); // Ignore error if column already exists
+            
+            // Migrate data from JSON to single values
+            // For voted_on_slots, take the last (most recent) value from the JSON array
+            // For latency_slots, take the last value as well
+            sqlx::query(
+                r#"
+                UPDATE vote_latencies 
+                SET voted_on_slot = CAST(json_extract(voted_on_slots, '$[#-1]') AS BIGINT),
+                    latency_slots = CAST(json_extract(latency_slots, '$[#-1]') AS INTEGER)
+                WHERE voted_on_slots IS NOT NULL 
+                  AND json_valid(voted_on_slots)
+                  AND json_valid(latency_slots)
+                "#
+            )
+            .execute(&*self.pool)
+            .await?;
+            
+            info!("Migrated JSON data to single values");
+            
+            // Note: We don't drop the old columns here to allow for rollback if needed
+            // They can be dropped in a later migration after confirming the data is correct
         }
         
         // Check if mean_slots column exists in metrics table
@@ -362,16 +418,20 @@ impl StorageManagerTrait for StorageManager {
             return Err(Error::parse("Slot number suspiciously large"));
         }
         
-        // Serialize arrays as JSON strings
-        let voted_on_slots_json = serde_json::to_string(&latency.voted_on_slots)?;
-        let latency_slots_json = serde_json::to_string(&latency.latency_slots)?;
+        // Auto-insert validator if it doesn't exist to prevent foreign key constraint errors
+        self.ensure_validator_exists(latency.validator_pubkey, latency.vote_pubkey).await?;
+        
+        // Get the single voted slot and latency value
+        // For compatibility, use the last (most recent) values if still using arrays
+        let voted_on_slot = latency.voted_on_slots.last().copied().unwrap_or(latency.slot);
+        let latency_slots_value = latency.latency_slots.last().copied().unwrap_or(0) as i64;
         
         sqlx::query(
             r#"
             INSERT INTO vote_latencies (
                 validator_pubkey, vote_pubkey, slot, signature,
                 vote_timestamp, received_timestamp, latency_ms,
-                voted_on_slots, landed_slot, latency_slots
+                voted_on_slot, landed_slot, latency_slots
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -382,9 +442,9 @@ impl StorageManagerTrait for StorageManager {
         .bind(latency.vote_timestamp)
         .bind(latency.received_timestamp)
         .bind(latency.latency_ms as i64)
-        .bind(voted_on_slots_json)
+        .bind(voted_on_slot as i64)
         .bind(latency.landed_slot as i64)
-        .bind(latency_slots_json)
+        .bind(latency_slots_value)
         .execute(&*self.pool)
         .await?;
         
@@ -443,7 +503,7 @@ impl StorageManagerTrait for StorageManager {
                 r#"
                 SELECT validator_pubkey, vote_pubkey, slot, signature,
                        vote_timestamp, received_timestamp, latency_ms,
-                       voted_on_slots, landed_slot, latency_slots
+                       voted_on_slot, landed_slot, latency_slots
                 FROM vote_latencies
                 WHERE validator_pubkey = ? 
                   AND vote_timestamp >= ? 
@@ -459,7 +519,7 @@ impl StorageManagerTrait for StorageManager {
                 r#"
                 SELECT validator_pubkey, vote_pubkey, slot, signature,
                        vote_timestamp, received_timestamp, latency_ms,
-                       voted_on_slots, landed_slot, latency_slots
+                       voted_on_slot, landed_slot, latency_slots
                 FROM vote_latencies
                 WHERE vote_timestamp >= ? 
                   AND vote_timestamp <= ?
@@ -475,18 +535,18 @@ impl StorageManagerTrait for StorageManager {
         let latencies = rows
             .into_iter()
             .map(|row| {
-                // Deserialize JSON arrays
-                let voted_on_slots: Vec<u64> = row.get::<Option<String>, _>(7)
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_else(|| vec![row.get::<i64, _>(2) as u64]);
+                // Get single values instead of JSON arrays
+                let voted_on_slot = row.get::<Option<i64>, _>(7)
+                    .map(|s| s as u64)
+                    .unwrap_or(row.get::<i64, _>(2) as u64);
                 
                 let landed_slot = row.get::<Option<i64>, _>(8)
                     .map(|s| s as u64)
                     .unwrap_or(row.get::<i64, _>(2) as u64);
                 
-                let latency_slots: Vec<u8> = row.get::<Option<String>, _>(9)
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_else(|| vec![0]);
+                let latency_slots_value = row.get::<Option<i64>, _>(9)
+                    .map(|s| s as u8)
+                    .unwrap_or(0);
                 
                 Ok(VoteLatency {
                     validator_pubkey: row.get::<String, _>(0).parse()?,
@@ -496,9 +556,9 @@ impl StorageManagerTrait for StorageManager {
                     vote_timestamp: row.get(4),
                     received_timestamp: row.get(5),
                     latency_ms: row.get::<i64, _>(6) as u64,
-                    voted_on_slots,
+                    voted_on_slots: vec![voted_on_slot], // For compatibility, wrap in vec
                     landed_slot,
-                    latency_slots,
+                    latency_slots: vec![latency_slots_value], // For compatibility, wrap in vec
                 })
             })
             .collect::<AnyResult<Vec<_>>>()?;
@@ -584,6 +644,43 @@ impl StorageManagerTrait for StorageManager {
         .bind(grpc_endpoint)
         .execute(&*self.pool)
         .await?;
+        
+        Ok(())
+    }
+}
+
+impl StorageManager {
+    /// Ensure a validator exists in the database, creating it if necessary
+    /// This prevents foreign key constraint errors when storing vote latencies.
+    /// 
+    /// Key insight: Solana validators have TWO pubkeys:
+    /// - validator_pubkey (identity): The validator's main identity, stored in 'validators' table
+    /// - vote_pubkey (vote account): The account that receives vote transactions
+    /// 
+    /// Vote transactions reference the validator's identity pubkey, but are processed
+    /// via vote account subscriptions. This method ensures the identity pubkey exists
+    /// in the validators table when we receive votes for it.
+    async fn ensure_validator_exists(&self, validator_pubkey: Pubkey, vote_pubkey: Pubkey) -> Result<()> {
+        debug!("Ensuring validator exists: identity={}, vote_account={}", validator_pubkey, vote_pubkey);
+        
+        // Check if validator already exists
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM validators WHERE pubkey = ?"
+        )
+        .bind(validator_pubkey.to_string())
+        .fetch_one(&*self.pool)
+        .await? > 0;
+        
+        if !exists {
+            debug!("Auto-inserting missing validator: {}", validator_pubkey);
+            
+            // Create a minimal ValidatorInfo and store it
+            let validator_info = ValidatorInfo::new(validator_pubkey, vote_pubkey);
+            self.store_validator_info(&validator_info).await?;
+            
+            info!("Auto-inserted validator {} with vote account {} from vote transaction", 
+                  validator_pubkey, vote_pubkey);
+        }
         
         Ok(())
     }
@@ -715,9 +812,9 @@ mod tests {
             vote_timestamp: Utc::now(),
             received_timestamp: Utc::now(),
             latency_ms: 150,
-            voted_on_slots: vec![12343, 12344, 12345],
+            voted_on_slots: vec![12345], // Single value for new schema
             landed_slot: 12347,
-            latency_slots: vec![4, 3, 2],
+            latency_slots: vec![2], // Single latency value
         };
         
         storage.store_vote_latency(&vote_latency).await.unwrap();
@@ -734,9 +831,9 @@ mod tests {
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].slot, 12345);
         assert_eq!(latencies[0].latency_ms, 150);
-        assert_eq!(latencies[0].voted_on_slots, vec![12343, 12344, 12345]);
+        assert_eq!(latencies[0].voted_on_slots, vec![12345]); // Single value
         assert_eq!(latencies[0].landed_slot, 12347);
-        assert_eq!(latencies[0].latency_slots, vec![4, 3, 2]);
+        assert_eq!(latencies[0].latency_slots, vec![2]); // Single latency value
         
         // Store metrics
         let metrics = LatencyMetrics {
