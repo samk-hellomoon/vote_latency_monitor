@@ -131,6 +131,16 @@ impl StorageManager {
             .execute(&*self.pool)
             .await?;
         
+        // Add busy timeout to handle concurrent writes better
+        sqlx::query("PRAGMA busy_timeout = 5000")  // 5 second timeout
+            .execute(&*self.pool)
+            .await?;
+        
+        // Enable query parallelization for reads
+        sqlx::query("PRAGMA read_uncommitted = true")
+            .execute(&*self.pool)
+            .await?;
+        
         info!("Applied SQLite performance optimizations");
         Ok(())
     }

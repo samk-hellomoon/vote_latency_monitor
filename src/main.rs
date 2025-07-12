@@ -205,19 +205,24 @@ async fn run_monitor(config: Config) -> Result<()> {
                 // Parse the vote transaction
                 match parser_clone.parse(&vote_tx).await {
                     Ok(vote_latency) => {
-                        // Calculate metrics
+                        // Calculate metrics (non-blocking, just updates in-memory data)
                         let calc = calculator_clone.read().await;
                         if let Err(e) = calc.calculate(&vote_latency).await {
                             error!("Failed to calculate latency: {}", e);
                         }
+                        drop(calc); // Release the lock immediately
                         
-                        // Store in database
-                        if let Err(e) = storage_clone.store_vote_latency(&vote_latency).await {
-                            error!("Failed to store vote latency: {}", e);
-                        } else {
-                            trace!("Stored vote latency for validator {} slot {}", 
-                                vote_latency.validator_pubkey, vote_latency.slot);
-                        }
+                        // Store in database using a separate task to avoid blocking the channel
+                        let storage_for_task = storage_clone.clone();
+                        let vote_latency_clone = vote_latency.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = storage_for_task.store_vote_latency(&vote_latency_clone).await {
+                                error!("Failed to store vote latency: {}", e);
+                            } else {
+                                trace!("Stored vote latency for validator {} slot {}", 
+                                    vote_latency_clone.validator_pubkey, vote_latency_clone.slot);
+                            }
+                        });
                     }
                     Err(e) => {
                         error!("Failed to parse vote transaction: {}", e);

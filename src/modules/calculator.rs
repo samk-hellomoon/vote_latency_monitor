@@ -287,10 +287,13 @@ impl LatencyCalculator {
             loop {
                 select! {
                     _ = interval.tick() => {
-                        let global = global_metrics.read().await;
-                        let latencies: Vec<u64> = global.all_latencies.iter().copied().collect();
-                        let slot_latencies: Vec<Vec<u8>> = global.all_slot_latencies.iter().cloned().collect();
-                        drop(global);
+                        // Quickly grab a snapshot of the data to minimize lock time
+                        let (latencies, slot_latencies, validator_count) = {
+                            let global = global_metrics.read().await;
+                            let latencies: Vec<u64> = global.all_latencies.iter().copied().collect();
+                            let slot_latencies: Vec<Vec<u8>> = global.all_slot_latencies.iter().cloned().collect();
+                            (latencies, slot_latencies, validator_metrics.len())
+                        };
                         
                         if !latencies.is_empty() {
                             let metrics = LatencyCalculator::calculate_combined_stats(&latencies, &slot_latencies);
@@ -299,23 +302,28 @@ impl LatencyCalculator {
                                 metrics.mean_ms, metrics.mean_slots,
                                 metrics.median_ms, metrics.median_slots,
                                 metrics.p95_ms, metrics.p95_slots,
-                                validator_metrics.len()
+                                validator_count
                             );
                             info!(
                                 "Vote distribution - 1 slot: {}, 2 slots: {}, 3+ slots: {}",
                                 metrics.votes_1_slot, metrics.votes_2_slots, metrics.votes_3plus_slots
                             );
                             
-                            // Store metrics if storage is available
+                            // Store metrics in a separate non-blocking task to avoid holding locks
                             if let Some(storage) = &storage {
-                                if let Err(e) = storage.store_metrics(&metrics, None).await {
-                                    tracing::error!("Failed to store global metrics: {}", e);
-                                }
+                                let storage_clone = storage.clone();
+                                let metrics_clone = metrics.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = storage_clone.store_metrics(&metrics_clone, None).await {
+                                        tracing::error!("Failed to store global metrics: {}", e);
+                                    }
+                                });
                             }
                             
-                            // Update current metrics
+                            // Update current metrics with minimal lock time
                             let mut global = global_metrics.write().await;
                             global.current_metrics = Some(metrics);
+                            drop(global); // Explicitly drop to release lock immediately
                         }
                     }
                     _ = shutdown_rx.recv() => {
