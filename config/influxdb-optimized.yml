@@ -1,0 +1,59 @@
+# InfluxDB v2 Configuration for Solana Vote Latency Monitor
+# Optimized for 3000+ writes/second
+
+# HTTP API Configuration
+http-bind-address: ":8086"
+http-idle-timeout: 3m
+http-read-timeout: 0
+http-write-timeout: 0
+
+# Storage Paths (macOS Homebrew)
+bolt-path: "/opt/homebrew/var/lib/influxdb2/influxdb.bolt"
+engine-path: "/opt/homebrew/var/lib/influxdb2/engine"
+sqlite-path: "/opt/homebrew/var/lib/influxdb2/influxd.sqlite"
+
+# Query Performance
+query-concurrency: 1024
+query-queue-size: 1024
+query-memory-bytes: 0  # Unlimited
+
+# Storage Cache Configuration (Critical for Performance)
+storage-cache-max-memory-size: 2147483648  # 2GB (was 1GB)
+storage-cache-snapshot-memory-size: 52428800  # 50MB (was 25MB)
+storage-cache-snapshot-write-cold-duration: 10m
+
+# Compaction Settings
+storage-compact-full-write-cold-duration: 4h
+storage-compact-throughput-burst: 50331648  # 48MB
+storage-max-concurrent-compactions: 8  # Explicit setting for high load
+
+# Series Cache (Important for Many Validators)
+storage-series-id-set-cache-size: 104857600  # 100MB
+
+# WAL (Write-Ahead Log) Settings
+storage-wal-fsync-delay: 100ms  # Batch syncs instead of every write
+storage-wal-max-concurrent-writes: 100  # Limit concurrent writes
+storage-wal-max-write-delay: 10m
+
+# Other Storage Settings
+storage-retention-check-interval: 30m
+storage-shard-precreator-advance-period: 30m
+storage-shard-precreator-check-interval: 10m
+storage-write-timeout: 10s
+
+# Logging
+log-level: "info"
+flux-log-enabled: false
+
+# Security (for production)
+strong-passwords: true
+session-length: 60
+session-renew-disabled: false
+
+# Metrics
+metrics-disabled: false
+reporting-disabled: false
+
+# TLS Configuration (if needed)
+tls-min-version: "1.2"
+tls-strict-ciphers: false

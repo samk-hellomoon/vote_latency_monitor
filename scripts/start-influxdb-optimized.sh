@@ -1,0 +1,36 @@
+#!/bin/bash
+# Start InfluxDB v2 with optimized settings for Solana Vote Latency Monitor
+
+# Storage Cache Configuration (2GB instead of 1GB)
+export INFLUXD_STORAGE_CACHE_MAX_MEMORY_SIZE=2147483648
+export INFLUXD_STORAGE_CACHE_SNAPSHOT_MEMORY_SIZE=52428800
+export INFLUXD_STORAGE_CACHE_SNAPSHOT_WRITE_COLD_DURATION=10m
+
+# Compaction Settings
+export INFLUXD_STORAGE_COMPACT_FULL_WRITE_COLD_DURATION=4h
+export INFLUXD_STORAGE_COMPACT_THROUGHPUT_BURST=50331648
+export INFLUXD_STORAGE_MAX_CONCURRENT_COMPACTIONS=8
+
+# Series Cache (100MB for many validators)
+export INFLUXD_STORAGE_SERIES_ID_SET_CACHE_SIZE=104857600
+
+# WAL Settings (Critical for write performance)
+export INFLUXD_STORAGE_WAL_FSYNC_DELAY=100ms
+export INFLUXD_STORAGE_WAL_MAX_CONCURRENT_WRITES=100
+export INFLUXD_STORAGE_WAL_MAX_WRITE_DELAY=10m
+
+# Other optimizations
+export INFLUXD_STORAGE_RETENTION_CHECK_INTERVAL=30m
+export INFLUXD_STORAGE_WRITE_TIMEOUT=10s
+export INFLUXD_QUERY_CONCURRENCY=1024
+export INFLUXD_QUERY_QUEUE_SIZE=1024
+
+# Logging
+export INFLUXD_LOG_LEVEL=info
+
+echo "Starting InfluxDB with optimized settings..."
+echo "Cache: 2GB | WAL Fsync: 100ms | Compactions: 8"
+echo ""
+
+# Start InfluxDB
+influxd
