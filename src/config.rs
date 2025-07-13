@@ -21,11 +21,8 @@ pub struct Config {
     /// gRPC subscription configuration
     pub grpc: GrpcConfig,
     
-    /// Storage configuration
-    pub storage: StorageConfig,
-    
-    /// InfluxDB configuration (optional, for migration)
-    pub influxdb: Option<InfluxConfig>,
+    /// InfluxDB storage configuration
+    pub influxdb: InfluxConfig,
     
     /// Metrics configuration
     pub metrics: MetricsConfig,
@@ -94,24 +91,6 @@ pub struct GrpcConfig {
     pub enable_tls: bool,
 }
 
-/// Storage configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorageConfig {
-    /// Database file path
-    pub database_path: String,
-    
-    /// Maximum database connections
-    pub max_connections: u32,
-    
-    /// Enable WAL mode for SQLite
-    pub enable_wal: bool,
-    
-    /// Data retention period in days
-    pub retention_days: u32,
-    
-    /// Batch size for bulk inserts
-    pub batch_size: usize,
-}
 
 /// InfluxDB configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,26 +229,26 @@ impl Config {
             return Err(anyhow::anyhow!("Latency window size must be greater than 0"));
         }
         
-        // Validate database path
-        if self.storage.database_path.is_empty() {
-            return Err(anyhow::anyhow!("Database path cannot be empty"));
+        // Validate InfluxDB configuration
+        if self.influxdb.token.is_empty() {
+            return Err(anyhow::anyhow!("InfluxDB token cannot be empty"));
         }
         
-        // Validate database path against path traversal (allow in-memory for tests)
-        if self.storage.database_path != ":memory:" {
-            security::validate_path(&self.storage.database_path, None)
-                .map_err(|e| anyhow::anyhow!("Invalid database path: {}", e))?;
+        if self.influxdb.url.is_empty() {
+            return Err(anyhow::anyhow!("InfluxDB URL cannot be empty"));
         }
         
-        // Validate retention days
-        if self.storage.retention_days == 0 {
-            return Err(anyhow::anyhow!("Retention days must be greater than 0"));
+        if self.influxdb.org.is_empty() {
+            return Err(anyhow::anyhow!("InfluxDB organization cannot be empty"));
         }
         
-        // Validate batch size
-        if self.storage.batch_size == 0 {
-            return Err(anyhow::anyhow!("Batch size must be greater than 0"));
+        if self.influxdb.bucket.is_empty() {
+            return Err(anyhow::anyhow!("InfluxDB bucket cannot be empty"));
         }
+        
+        // Validate InfluxDB URL (allows localhost)
+        security::validate_influxdb_url(&self.influxdb.url, Some(&["http", "https"]))
+            .map_err(|e| anyhow::anyhow!("Invalid InfluxDB URL: {}", e))?;
         
         // Validate gRPC buffer size
         if self.grpc.buffer_size == 0 {
@@ -327,13 +306,6 @@ impl Default for Config {
                 buffer_size: 10000,
                 enable_tls: true,
             },
-            storage: StorageConfig {
-                database_path: "./data/svlm.db".to_string(),
-                max_connections: 10,
-                enable_wal: true,
-                retention_days: 30,
-                batch_size: 1000,
-            },
             metrics: MetricsConfig {
                 enabled: true,
                 bind_address: "127.0.0.1".to_string(),
@@ -354,7 +326,16 @@ impl Default for Config {
                 stats_interval_secs: 60,
                 outlier_threshold: 3.0,
             },
-            influxdb: None,
+            influxdb: InfluxConfig {
+                url: "http://localhost:8086".to_string(),
+                org: "solana-monitor".to_string(),
+                token: "test-token-for-testing-only".to_string(), // Must be provided via config or env
+                bucket: "vote-latencies-raw".to_string(),
+                batch_size: 5000,
+                flush_interval_ms: 100,
+                num_workers: 2,
+                enable_compression: true,
+            },
         }
     }
 }
@@ -374,6 +355,7 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let mut config = Config::default();
+        config.influxdb.token = "test-token".to_string();
         
         // Valid config should pass
         assert!(config.validate().is_ok());
@@ -415,18 +397,8 @@ mod tests {
     fn test_config_validation_database() {
         let mut config = Config::default();
         
-        // Empty database path should fail
-        config.storage.database_path = String::new();
-        assert!(config.validate().is_err());
-        
-        // Zero retention days should fail
-        config = Config::default();
-        config.storage.retention_days = 0;
-        assert!(config.validate().is_err());
-        
-        // Zero batch size should fail
-        config = Config::default();
-        config.storage.batch_size = 0;
+        // Empty InfluxDB token should fail
+        config.influxdb.token = String::new();
         assert!(config.validate().is_err());
     }
     
@@ -471,13 +443,13 @@ mod tests {
     }
     
     #[test]
-    fn test_storage_config_defaults() {
+    fn test_influxdb_config_defaults() {
         let config = Config::default();
-        assert_eq!(config.storage.database_path, "./data/svlm.db");
-        assert_eq!(config.storage.max_connections, 10);
-        assert!(config.storage.enable_wal);
-        assert_eq!(config.storage.retention_days, 30);
-        assert_eq!(config.storage.batch_size, 1000);
+        assert_eq!(config.influxdb.url, "http://localhost:8086");
+        assert_eq!(config.influxdb.org, "solana-monitor");
+        assert_eq!(config.influxdb.bucket, "vote-latencies-raw");
+        assert_eq!(config.influxdb.batch_size, 5000);
+        assert_eq!(config.influxdb.flush_interval_ms, 100);
     }
     
     #[test]

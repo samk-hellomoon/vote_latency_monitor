@@ -90,6 +90,46 @@ pub fn validate_url(url_str: &str, allowed_schemes: Option<&[&str]>) -> Result<S
     Ok(url.to_string())
 }
 
+/// Validates a URL string for InfluxDB (allows localhost)
+///
+/// # Arguments
+/// * `url_str` - The URL string to validate
+/// * `allowed_schemes` - Optional list of allowed URL schemes (e.g., ["http", "https"])
+///
+/// # Returns
+/// * `Ok(String)` with normalized URL if valid
+/// * `Err(String)` with error message if invalid
+pub fn validate_influxdb_url(url_str: &str, allowed_schemes: Option<&[&str]>) -> Result<String> {
+    // Check length
+    if url_str.is_empty() {
+        return Err(anyhow!("URL cannot be empty"));
+    }
+    
+    if url_str.len() > MAX_URL_LENGTH {
+        return Err(anyhow!("URL exceeds maximum length of {} characters", MAX_URL_LENGTH));
+    }
+    
+    // Parse URL
+    let url = Url::parse(url_str)
+        .map_err(|e| anyhow!("Invalid URL format: {}", e))?;
+    
+    // Check scheme
+    if let Some(schemes) = allowed_schemes {
+        if !schemes.contains(&url.scheme()) {
+            return Err(anyhow!("URL scheme '{}' not allowed. Allowed schemes: {:?}", 
+                url.scheme(), schemes));
+        }
+    } else {
+        // Default to only allowing http and https
+        if !["http", "https"].contains(&url.scheme()) {
+            return Err(anyhow!("Only HTTP and HTTPS URLs are allowed"));
+        }
+    }
+    
+    // For InfluxDB, we allow localhost/private IPs since it often runs locally
+    Ok(url.to_string())
+}
+
 /// Validates a file path to prevent path traversal attacks
 ///
 /// # Arguments

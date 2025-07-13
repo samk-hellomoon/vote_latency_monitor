@@ -13,7 +13,7 @@ A high-performance monitoring tool that tracks vote latency metrics for Solana v
   - Local Solana validator with Yellowstone gRPC plugin enabled (recommended)
   - Access to a Yellowstone gRPC-enabled endpoint (e.g., Hellomoon, Triton)
   - Public RPC endpoint (discovery only, no real-time monitoring)
-- **SQLite** - Usually pre-installed on most systems
+- **InfluxDB 2.x** - High-performance time-series database
 - **4GB+ RAM** - For monitoring validators
 - **10GB+ disk space** - For data storage (configurable)
 
@@ -40,14 +40,7 @@ cp config/example.toml config/config.toml
 nano config/config.toml
 ```
 
-### 3. Initialize Database
-
-```bash
-# Create the database schema
-./target/release/svlm init-db
-```
-
-### 4. Run the Monitor
+### 3. Run the Monitor
 
 ```bash
 # Start monitoring (uses config/config.toml by default)
@@ -77,9 +70,13 @@ endpoint = "http://localhost:10000"
 # For Triton: "https://YOUR-ENDPOINT.triton.one:443"
 max_subscriptions = 50  # Start low, increase based on performance
 
-[storage]
-database_path = "./data/svlm.db"
-retention_days = 7  # Adjust based on disk space
+[influxdb]
+url = "http://localhost:8086"
+org = "solana-monitor"
+token = "your-influxdb-token"
+bucket = "vote-latencies-raw"
+batch_size = 5000
+flush_interval_ms = 100
 
 [metrics]
 # Prometheus metrics endpoint
@@ -99,8 +96,9 @@ export SVLM_SOLANA_RPC_ENDPOINT="https://api.devnet.solana.com"
 # Override log level
 export SVLM_LOG_LEVEL="debug"
 
-# Override database path
-export SVLM_STORAGE_DATABASE_PATH="/var/lib/svlm/data.db"
+# Override InfluxDB settings
+export SVLM_INFLUXDB_URL="http://localhost:8086"
+export SVLM_INFLUXDB_TOKEN="your-token"
 ```
 
 ## Basic Usage Examples
@@ -142,42 +140,42 @@ export SVLM_GRPC_ENABLED="false"
 
 ## Querying Collected Data
 
-### Using SQLite CLI
+### Using InfluxDB CLI
 
 ```bash
-# Open the database
-sqlite3 ./data/svlm.db
-
-# View recent vote latencies
-SELECT 
-    validator_pubkey,
-    AVG(latency_slots) as avg_latency,
-    COUNT(*) as vote_count
-FROM vote_latencies
-WHERE timestamp > datetime('now', '-1 hour')
-GROUP BY validator_pubkey
-ORDER BY avg_latency DESC
-LIMIT 20;
+# View recent vote latencies (Flux query)
+influx query '
+from(bucket: "vote-latencies-raw")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "vote_latency")
+  |> filter(fn: (r) => r._field == "latency_slots")
+  |> group(columns: ["validator_pubkey"])
+  |> mean()
+  |> sort(columns: ["_value"], desc: true)
+  |> limit(n: 20)
+'
 
 # View validator performance over time
-SELECT 
-    strftime('%Y-%m-%d %H:00', timestamp) as hour,
-    validator_pubkey,
-    AVG(latency_slots) as avg_latency,
-    MAX(latency_slots) as max_latency
-FROM vote_latencies
-WHERE validator_pubkey = 'YOUR_VALIDATOR_PUBKEY'
-GROUP BY hour
-ORDER BY hour DESC;
+influx query '
+from(bucket: "vote-latencies-raw")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "vote_latency")
+  |> filter(fn: (r) => r.validator_pubkey == "YOUR_VALIDATOR_PUBKEY")
+  |> filter(fn: (r) => r._field == "latency_slots")
+  |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+'
 ```
 
 ### Export Data to CSV
 
 ```bash
 # Export hourly latency statistics
-sqlite3 -header -csv ./data/svlm.db \
-"SELECT * FROM vote_latencies WHERE timestamp > datetime('now', '-24 hours')" \
-> latencies_24h.csv
+influx query -o csv '
+from(bucket: "vote-latencies-raw")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "vote_latency")
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+' > latencies_24h.csv
 ```
 
 ### Using the Metrics Endpoint
@@ -225,14 +223,14 @@ curl http://localhost:9090/metrics
 - Decrease `buffer_size` in gRPC config
 - Enable more aggressive data retention (`retention_days`)
 
-#### 4. Database locked errors
+#### 4. InfluxDB connection errors
 
-**Problem**: "database is locked" messages
+**Problem**: Cannot connect to InfluxDB
 
 **Solution**:
-- Ensure only one instance is running
-- Check disk space availability
-- Verify WAL mode is enabled in config
+- Ensure InfluxDB is running: `docker ps | grep influx`
+- Verify URL and port are correct (default: 8086)
+- Check token has write permissions to the bucket
 
 #### 5. No validators discovered
 
@@ -269,9 +267,10 @@ worker_threads = 4  # Limit CPU usage
 max_subscriptions = 25  # Start small
 buffer_size = 5000  # Reduce memory usage
 
-[storage]
-batch_size = 100  # Smaller batches
-max_connections = 3  # Fewer DB connections
+[influxdb]
+batch_size = 1000  # Smaller batches for limited resources
+flush_interval_ms = 500  # Less frequent flushes
+num_workers = 2  # Fewer worker threads
 
 [discovery]
 refresh_interval_secs = 300  # Less frequent updates
@@ -293,6 +292,6 @@ For migration from older versions or custom implementations, see [docs/YELLOWSTO
 ## Next Steps
 
 - Monitor the Prometheus metrics at http://localhost:9090/metrics
-- Query the SQLite database for historical analysis
+- Query the InfluxDB database for historical analysis
 - Adjust configuration based on your system's performance
 - Consider setting up Grafana for visualization (see docs/)

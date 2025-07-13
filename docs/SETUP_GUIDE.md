@@ -15,13 +15,19 @@
    rustup update stable
    ```
 
-2. **SQLite** (usually pre-installed, or install via package manager)
+2. **InfluxDB 2.x** (Time-series database for storing metrics)
    ```bash
-   # Ubuntu/Debian
-   sudo apt-get install sqlite3
-
-   # macOS (via Homebrew)
-   brew install sqlite
+   # Docker (recommended)
+   docker run -d -p 8086:8086 \
+     -v influxdb2:/var/lib/influxdb2 \
+     -e DOCKER_INFLUXDB_INIT_MODE=setup \
+     -e DOCKER_INFLUXDB_INIT_USERNAME=admin \
+     -e DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword \
+     -e DOCKER_INFLUXDB_INIT_ORG=solana-monitor \
+     -e DOCKER_INFLUXDB_INIT_BUCKET=vote-latencies-raw \
+     influxdb:2
+   
+   # Or install directly - see https://docs.influxdata.com/influxdb/v2/install/
    ```
 
 3. **Solana CLI Tools** (optional, for running local validator)

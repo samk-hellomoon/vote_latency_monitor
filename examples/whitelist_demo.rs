@@ -1,5 +1,4 @@
-use std::sync::Arc;
-use svlm::config::{Config, DiscoveryConfig, AppConfig, SolanaConfig, GrpcConfig, StorageConfig, MetricsConfig, LatencyConfig};
+use svlm::config::{Config, DiscoveryConfig, AppConfig, SolanaConfig, GrpcConfig, InfluxConfig, MetricsConfig, LatencyConfig};
 
 fn main() {
     println!("Demonstrating whitelist filtering that accepts both identity and vote account pubkeys\n");
@@ -32,18 +31,23 @@ fn main() {
             max_concurrent_requests: 5,
         },
         grpc: GrpcConfig {
+            endpoint: None,
+            access_token: None,
             max_subscriptions: 50,
             connection_timeout_secs: 30,
             reconnect_interval_secs: 5,
             buffer_size: 10000,
             enable_tls: false,
         },
-        storage: StorageConfig {
-            database_path: "./demo.db".to_string(),
-            max_connections: 5,
-            enable_wal: true,
-            retention_days: 7,
-            batch_size: 500,
+        influxdb: InfluxConfig {
+            url: "http://localhost:8086".to_string(),
+            org: "demo".to_string(),
+            token: "demo-token".to_string(),
+            bucket: "demo-bucket".to_string(),
+            batch_size: 1000,
+            flush_interval_ms: 100,
+            num_workers: 2,
+            enable_compression: false,
         },
         metrics: MetricsConfig {
             enabled: false,

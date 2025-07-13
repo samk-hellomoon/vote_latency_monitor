@@ -22,8 +22,7 @@ yellowstone-grpc-client = "8.0.0"
 yellowstone-grpc-proto = "8.0.0"
 tonic = "0.12"
 
-# Database
-sqlx = { version = "0.6", default-features = false, features = ["runtime-tokio-native-tls", "sqlite", "migrate", "chrono"] }
+# Database - removed SQLite, using InfluxDB only
 
 # InfluxDB for time-series data
 influxdb2 = "0.5"
@@ -101,9 +100,6 @@ hex = "0.4"
 name = "svlm"
 path = "src/main.rs"
 
-[[bin]]
-name = "migrate_to_influx"
-path = "src/bin/migrate_to_influx.rs"
 
 [[example]]
 name = "debug_vote_failure"

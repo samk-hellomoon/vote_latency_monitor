@@ -284,7 +284,7 @@ impl ValidatorDiscoveryTrait for ValidatorDiscovery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, SolanaConfig, GrpcConfig, StorageConfig, MetricsConfig, LatencyConfig, DiscoveryConfig};
+    use crate::config::{AppConfig, SolanaConfig, GrpcConfig, InfluxConfig, MetricsConfig, LatencyConfig, DiscoveryConfig};
 
     fn create_test_config() -> Config {
         Config {
@@ -309,12 +309,15 @@ mod tests {
                 buffer_size: 10000,
                 enable_tls: false,
             },
-            storage: StorageConfig {
-                database_path: "./test.db".to_string(),
-                max_connections: 5,
-                enable_wal: true,
-                retention_days: 7,
-                batch_size: 500,
+            influxdb: InfluxConfig {
+                url: "http://localhost:8086".to_string(),
+                org: "test-org".to_string(),
+                token: "test-token".to_string(),
+                bucket: "test-bucket".to_string(),
+                batch_size: 1000,
+                flush_interval_ms: 100,
+                num_workers: 2,
+                enable_compression: false,
             },
             metrics: MetricsConfig {
                 enabled: false,
@@ -336,7 +339,6 @@ mod tests {
                 stats_interval_secs: 30,
                 outlier_threshold: 3.0,
             },
-            influxdb: None,
         }
     }
 

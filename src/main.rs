@@ -9,13 +9,13 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::broadcast;
 use tokio::signal;
 use tracing::{info, error, trace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use svlm::config::Config;
-use svlm::modules::{ModuleManager, ShutdownSignal, Shutdown};
+use svlm::modules::{ShutdownSignal, Shutdown};
 use svlm::modules::discovery::ValidatorDiscoveryTrait;
 use svlm::modules::subscription::SubscriptionManagerTrait;
 use svlm::modules::parser::VoteParserTrait;
@@ -49,8 +49,6 @@ enum Commands {
         #[arg(long)]
         workers: Option<usize>,
     },
-    /// Initialize the database
-    InitDb,
     /// Validate the configuration file
     ValidateConfig,
     /// List discovered validators
@@ -86,11 +84,6 @@ async fn main() -> Result<()> {
 
             // Initialize the monitoring system
             run_monitor(config).await?;
-        }
-        Some(Commands::InitDb) => {
-            info!("Initializing database...");
-            init_database(&config).await?;
-            info!("Database initialized successfully");
         }
         Some(Commands::ValidateConfig) => {
             info!("Configuration is valid");
@@ -137,10 +130,12 @@ async fn run_monitor(config: Config) -> Result<()> {
     let (shutdown_tx, _) = broadcast::channel::<ShutdownSignal>(1);
     let config = Arc::new(config);
     
-    // Step 1: Initialize the storage manager and create the database
-    info!("Initializing storage manager...");
-    let storage = svlm::modules::storage::StorageManager::new_from_config(&config.storage).await?;
-    info!("Storage initialized successfully");
+    // Initialize storage
+    info!("Initializing InfluxDB storage...");
+    let storage = Arc::new(
+        svlm::storage::InfluxDBStorage::new(config.influxdb.clone()).await?
+    );
+    info!("InfluxDB storage initialized successfully");
     
     // Step 2: Create and start the discovery module to fetch validators
     info!("Starting validator discovery...");
@@ -173,7 +168,7 @@ async fn run_monitor(config: Config) -> Result<()> {
     
     // Step 5: Create and start the subscription manager
     info!("Initializing subscription manager...");
-    let mut subscription_manager = svlm::modules::subscription::SubscriptionManager::new(
+    let subscription_manager = svlm::modules::subscription::SubscriptionManager::new(
         config.clone(),
         shutdown_tx.subscribe(),
     ).await?;
@@ -193,6 +188,7 @@ async fn run_monitor(config: Config) -> Result<()> {
     // Task 1: Process votes from subscription manager
     let parser_clone = parser.clone();
     let calculator_clone = calculator.clone();
+    let storage = storage as Arc<dyn svlm::modules::storage::StorageManagerTrait>;
     let storage_clone = storage.clone();
     let subscription_manager_for_processor = Arc::clone(&subscription_manager);
     let vote_processor = tokio::spawn(async move {
@@ -245,7 +241,7 @@ async fn run_monitor(config: Config) -> Result<()> {
                 Ok(new_validators) => {
                     drop(disc); // Release the lock
                     
-                    let mut sub_mgr = subscription_manager_clone.write().await;
+                    let sub_mgr = subscription_manager_clone.write().await;
                     for validator in new_validators {
                         if let Err(e) = sub_mgr.subscribe(&validator).await {
                             error!("Failed to subscribe to new validator {}: {}", validator.pubkey, e);
@@ -332,37 +328,6 @@ async fn wait_for_shutdown_signal() -> ShutdownSignal {
     }
 }
 
-/// Initialize the database
-async fn init_database(config: &Config) -> Result<()> {
-    use svlm::modules::storage::Storage;
-    use svlm::retry::{retry_with_config, RetryConfig};
-    use std::time::Duration;
-    
-    info!("Connecting to database: {}", config.storage.database_path);
-    
-    // Create retry config for database operations
-    let retry_config = RetryConfig::new()
-        .with_max_attempts(5)
-        .with_initial_delay(Duration::from_millis(500))
-        .with_max_delay(Duration::from_secs(5));
-    
-    // Initialize storage with retry
-    let storage = retry_with_config(
-        || async { Storage::new(&config.storage).await },
-        retry_config.clone(),
-    )
-    .await?;
-    
-    // Run migrations with retry
-    retry_with_config(
-        || async { storage.run_migrations().await },
-        retry_config,
-    )
-    .await?;
-    
-    info!("Database initialized successfully");
-    Ok(())
-}
 
 /// List validators from the RPC endpoint
 async fn list_validators(rpc_url: &str) -> Result<()> {

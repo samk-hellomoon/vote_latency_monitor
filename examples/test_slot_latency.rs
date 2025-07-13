@@ -1,6 +1,6 @@
 //! Test program to verify slot-based latency calculation
 
-use svlm::models::{VoteTransaction, VoteLatency};
+use svlm::models::VoteTransaction;
 use svlm::modules::parser::{VoteParser, VoteParserTrait};
 use solana_sdk::pubkey::Pubkey;
 use chrono::Utc;
@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let validator_pubkey = Pubkey::new_unique();
     let vote_pubkey = Pubkey::new_unique();
     
-    let mut vote_tx = VoteTransaction {
+    let vote_tx = VoteTransaction {
         signature: "test_signature".to_string(),
         validator_pubkey,
         vote_pubkey,

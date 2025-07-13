@@ -26,7 +26,7 @@ pub enum Error {
 
     /// Database errors
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(String),
 
     /// Parsing errors
     #[error("Parse error: {0}")]
@@ -107,6 +107,11 @@ impl Error {
     /// Create an invalid vote error
     pub fn invalid_vote<S: Into<String>>(msg: S) -> Self {
         Self::InvalidVote(msg.into())
+    }
+
+    /// Create a database error
+    pub fn database<S: Into<String>>(msg: S) -> Self {
+        Self::Database(msg.into())
     }
 
     /// Create a metrics error
@@ -368,7 +373,7 @@ mod tests {
         assert_eq!(err.external_message(), "Configuration error occurred");
         assert_ne!(err.external_message(), err.to_string());
         
-        let err = Error::Database(sqlx::Error::RowNotFound);
+        let err = Error::Database("Row not found".to_string());
         assert_eq!(err.external_message(), "Database operation failed");
         
         let err = Error::rpc("connection to 192.168.1.1 failed");

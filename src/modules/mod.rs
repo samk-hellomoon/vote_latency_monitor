@@ -16,7 +16,7 @@ pub mod subscription;
 pub use calculator::LatencyCalculator;
 pub use discovery::ValidatorDiscovery;
 pub use parser::VoteParser;
-pub use storage::{StorageManager, StorageManagerTrait};
+pub use storage::StorageManagerTrait;
 pub use subscription::SubscriptionManager;
 
 use crate::config::Config;
@@ -71,11 +71,15 @@ impl ModuleManager {
         info!("Starting all modules...");
         
         // Initialize storage
-        if self.config.storage.database_path != ":memory:" {
-            info!("Initializing storage module...");
-            let storage = StorageManager::new_from_config(&self.config.storage).await?;
-            self.storage = Some(storage.clone());
-        }
+        info!("Initializing storage module...");
+        
+        info!("Initializing InfluxDB storage...");
+        let influxdb_storage = Arc::new(
+            crate::storage::InfluxDBStorage::new(self.config.influxdb.clone()).await?
+        );
+        
+        self.storage = Some(influxdb_storage as Arc<dyn crate::modules::storage::StorageManagerTrait>);
+        info!("InfluxDB storage initialized successfully");
         
         // Initialize and start validator discovery
         if self.config.discovery.enabled {
