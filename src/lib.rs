@@ -16,6 +16,7 @@ pub mod models;
 pub mod modules;
 pub mod retry;
 pub mod security;
+pub mod storage;
 
 pub use config::Config;
 pub use error::{Error, Result};

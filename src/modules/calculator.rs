@@ -426,7 +426,7 @@ mod tests {
             vec![2, 3, 4],
         ];
         
-        let (mean, median, p95, p99, min, max, votes_1, votes_2, votes_3plus) = 
+        let (mean, median, _p95, _p99, min, max, votes_1, votes_2, votes_3plus) = 
             LatencyCalculator::calculate_slot_stats(&slot_latencies);
         
         // We have 9 total latencies: [1, 2, 3, 1, 1, 2, 2, 3, 4]
@@ -444,7 +444,7 @@ mod tests {
     #[tokio::test]
     async fn test_latency_calculator() {
         let config = Arc::new(Config::default());
-        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
         let calculator = LatencyCalculator::new(config, None, shutdown_rx).await.unwrap();
         
         let vote = VoteLatency {

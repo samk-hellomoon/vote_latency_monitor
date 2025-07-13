@@ -25,6 +25,15 @@ tonic = "0.12"
 # Database
 sqlx = { version = "0.6", default-features = false, features = ["runtime-tokio-native-tls", "sqlite", "migrate", "chrono"] }
 
+# InfluxDB for time-series data
+influxdb2 = "0.5"
+influxdb2-derive = "0.1"
+
+# For buffering and worker threads
+crossbeam-channel = "0.5"
+lru = "0.12"
+parking_lot = "0.12"
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -91,6 +100,10 @@ hex = "0.4"
 [[bin]]
 name = "svlm"
 path = "src/main.rs"
+
+[[bin]]
+name = "migrate_to_influx"
+path = "src/bin/migrate_to_influx.rs"
 
 [[example]]
 name = "debug_vote_failure"

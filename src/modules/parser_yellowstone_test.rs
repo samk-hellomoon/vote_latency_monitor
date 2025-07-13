@@ -142,7 +142,6 @@ mod tests {
             lockouts.push(Lockout::new(slot));
         }
         
-        use std::collections::VecDeque;
         
         let vote_state_update = VoteStateUpdate {
             lockouts: lockouts.into(),

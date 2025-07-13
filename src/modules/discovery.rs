@@ -336,6 +336,7 @@ mod tests {
                 stats_interval_secs: 30,
                 outlier_threshold: 3.0,
             },
+            influxdb: None,
         }
     }
 

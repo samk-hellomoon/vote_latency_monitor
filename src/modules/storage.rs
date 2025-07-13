@@ -887,4 +887,47 @@ mod tests {
             .unwrap();
         assert_eq!(metrics_count, 1);
     }
+
+    #[tokio::test]
+    async fn test_auto_insert_validator_on_vote_latency() {
+        let (storage, _temp_dir) = create_test_storage().await.unwrap();
+        
+        // Create a vote latency for a validator that doesn't exist
+        let validator_pubkey = Pubkey::new_unique();
+        let vote_pubkey = Pubkey::new_unique();
+        let vote_latency = VoteLatency::new_single_vote(
+            validator_pubkey,
+            vote_pubkey,
+            12345,
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            "test_signature_auto_insert".to_string(),
+            12350,
+        );
+        
+        // Verify validator doesn't exist yet
+        let validator_before = storage.get_validator_info(&validator_pubkey).await.unwrap();
+        assert!(validator_before.is_none());
+        
+        // Store vote latency - this should auto-insert the validator
+        storage.store_vote_latency(&vote_latency).await.unwrap();
+        
+        // Verify validator was auto-inserted
+        let validator_after = storage.get_validator_info(&validator_pubkey).await.unwrap();
+        assert!(validator_after.is_some());
+        let validator_after = validator_after.unwrap();
+        assert_eq!(validator_after.pubkey, validator_pubkey);
+        assert_eq!(validator_after.vote_account, vote_pubkey);
+        
+        // Verify the vote latency was stored
+        let latencies = storage.query_latencies(
+            Some(&validator_pubkey),
+            chrono::Utc::now() - chrono::Duration::hours(1),
+            chrono::Utc::now() + chrono::Duration::hours(1),
+        ).await.unwrap();
+        assert_eq!(latencies.len(), 1);
+        assert_eq!(latencies[0].signature, "test_signature_auto_insert");
+        assert_eq!(latencies[0].validator_pubkey, validator_pubkey);
+        assert_eq!(latencies[0].vote_pubkey, vote_pubkey);
+    }
 }

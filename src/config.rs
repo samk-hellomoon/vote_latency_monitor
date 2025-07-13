@@ -24,6 +24,9 @@ pub struct Config {
     /// Storage configuration
     pub storage: StorageConfig,
     
+    /// InfluxDB configuration (optional, for migration)
+    pub influxdb: Option<InfluxConfig>,
+    
     /// Metrics configuration
     pub metrics: MetricsConfig,
     
@@ -108,6 +111,34 @@ pub struct StorageConfig {
     
     /// Batch size for bulk inserts
     pub batch_size: usize,
+}
+
+/// InfluxDB configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfluxConfig {
+    /// InfluxDB URL (e.g., http://localhost:8086)
+    pub url: String,
+    
+    /// Organization name
+    pub org: String,
+    
+    /// API token for authentication
+    pub token: String,
+    
+    /// Primary bucket for raw data
+    pub bucket: String,
+    
+    /// Batch size for writes
+    pub batch_size: usize,
+    
+    /// Flush interval in milliseconds
+    pub flush_interval_ms: u64,
+    
+    /// Number of worker threads for writing
+    pub num_workers: usize,
+    
+    /// Enable compression for writes
+    pub enable_compression: bool,
 }
 
 /// Metrics configuration
@@ -323,6 +354,7 @@ impl Default for Config {
                 stats_interval_secs: 60,
                 outlier_threshold: 3.0,
             },
+            influxdb: None,
         }
     }
 }
